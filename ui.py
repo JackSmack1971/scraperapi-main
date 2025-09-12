@@ -426,7 +426,8 @@ To modify settings:
             
             return filename
         except Exception as e:
-            self.logger.error(f"Error generating filename for {url}: {e}")
+            self.logger.error("Error generating filename")
+            self.logger.debug("Error generating filename for %s: %s", url, e)
             # Fallback filename
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             return f"scraped_{timestamp}_{index:03d}.{file_format}"
@@ -473,8 +474,9 @@ To modify settings:
                         
                 except Exception as e:
                     self.failed_urls.append(url)
-                    self.logger.error(f'Error scraping {url}: {e}')
-                    self.update_progress(f'✗ Error scraping {url}: {str(e)[:50]}...', progress)
+                    self.logger.error("Error scraping URL")
+                    self.logger.debug("Error scraping %s: %s", url, e)
+                    self.update_progress('✗ Error scraping URL', progress)
                 
                 # Small delay to prevent overwhelming servers
                 time.sleep(1)
@@ -494,8 +496,9 @@ To modify settings:
             self.update_progress(summary_message, 100)
             
         except Exception as e:
-            self.logger.error(f'Critical error in scraping thread: {e}')
-            self.update_progress(f'Critical error: {str(e)}', None)
+            self.logger.error('Critical error in scraping thread')
+            self.logger.debug('Critical error in scraping thread: %s', e)
+            self.update_progress('Critical error occurred', None)
         
         finally:
             # Reset UI state
@@ -520,6 +523,7 @@ if __name__ == '__main__':
         app.run()
     except Exception as e:
         # Fallback logging if app fails to start
-        print(f"Failed to start ScraperApp: {e}")
-        logging.error(f"Failed to start ScraperApp: {e}")
+        print("Failed to start ScraperApp")
+        logging.error("Failed to start ScraperApp")
+        logging.debug("Failed to start ScraperApp: %s", e)
         raise
