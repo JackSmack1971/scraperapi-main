@@ -1,14 +1,14 @@
+import logging
 import os
+
 from dotenv import load_dotenv
+from kivy.config import Config
+from ui import ScraperApp
 from utils import configure_logging  # Ensure this import is present
 
 # Load environment variables from .env file
 load_dotenv()
 configure_logging()
-
-from kivy.config import Config
-from ui import ScraperApp
-import logging
 
 # Configure Kivy settings from environment variables
 Config.set('graphics', 'multisamples', '0')  # Disable multisampling

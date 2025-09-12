@@ -13,13 +13,13 @@ from kivy.uix.popup import Popup
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.clock import Clock, mainthread
+from kivy.clock import mainthread
 from kivy.utils import platform as kivy_platform
 import threading
 import logging
 import time
-from scraper import scrape_text_data, save_data_to_file, scrape_multiple_urls, validate_url
-from utils import configure_logging, get_logger
+from scraper import scrape_text_data, save_data_to_file, validate_url
+from utils import configure_logging, get_logger, log_json
 
 
 def get_default_output_directory():
@@ -435,7 +435,13 @@ To modify settings:
             return filename
         except Exception as e:
             self.logger.error("Error generating filename")
-            self.logger.debug("Error generating filename for %s: %s", url, e)
+            log_json(
+                self.logger,
+                logging.DEBUG,
+                "Error generating filename",
+                url=url,
+                error=str(e),
+            )
             # Fallback filename
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             return f"scraped_{timestamp}_{index:03d}.{file_format}"
@@ -496,7 +502,13 @@ To modify settings:
                 except Exception as e:
                     self.failed_urls.append(url)
                     self.logger.error("Error scraping URL")
-                    self.logger.debug("Error scraping %s: %s", url, e)
+                    log_json(
+                        self.logger,
+                        logging.DEBUG,
+                        "Error scraping",
+                        url=url,
+                        error=str(e),
+                    )
                     self.update_progress('✗ Error scraping URL', progress)
                 
                 # Small delay to prevent overwhelming servers
