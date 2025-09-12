@@ -1,9 +1,25 @@
+import json
 import logging
 import os
 import sys
 import platform
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
+
+
+def sanitize_url(url: str) -> str:
+    """Remove newline and carriage-return characters from a URL."""
+    return url.replace("\n", "").replace("\r", "")
+
+
+def log_json(
+    logger: logging.Logger, level: int, message: str, **kwargs: Any
+) -> None:
+    """Log a structured JSON message with optional sanitization."""
+    if "url" in kwargs and isinstance(kwargs["url"], str):
+        kwargs["url"] = sanitize_url(kwargs["url"])
+    logger.log(level, json.dumps({"message": message, **kwargs}))
 
 
 def get_default_log_directory():

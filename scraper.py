@@ -8,11 +8,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry  # FIXED: Updated import path
 from requests.exceptions import HTTPError, Timeout, TooManyRedirects, RequestException
 import concurrent.futures
-from urllib.parse import urljoin, urlparse
-from utils import configure_logging
+from urllib.parse import urlparse
+from utils import configure_logging, log_json, sanitize_url
 
 # Configure logging
 configure_logging()
+
+logger = logging.getLogger(__name__)
 
 # Load API key from environment variable - SECURITY IMPROVEMENT
 API_KEY = os.getenv('SCRAPER_API_KEY')
@@ -60,7 +62,7 @@ def validate_url(url):
         return True
     except Exception as e:
         logging.error("URL validation failed")
-        logging.debug("URL validation failed for %s: %s", url, e)
+        log_json(logger, logging.DEBUG, "URL validation failed", url=url, error=str(e))
         return False
 
 
@@ -70,24 +72,44 @@ def fetch_url(url, timeout=10):
         raise ValueError(f"Invalid URL: {url}")
     
     headers = {'User-Agent': get_random_user_agent()}
-    logging.debug(f'Fetching URL: {url} with headers: {headers}')
+    log_json(logger, logging.DEBUG, "Fetching URL", url=url, headers=headers)
     
     try:
         response = session.get(SCRAPERAPI_URL + url, headers=headers, timeout=timeout)
         response.raise_for_status()
-        logging.debug(f'URL fetched successfully: {url} - Response size: {len(response.content)} bytes')
+        log_json(logger,
+            logging.DEBUG,
+            "URL fetched successfully",
+            url=url,
+            response_size=len(response.content),
+        )
         return response.text
     except (HTTPError, Timeout, TooManyRedirects) as e:
         logging.error("HTTP/Network error occurred while fetching URL")
-        logging.debug("HTTP/Network error fetching %s: %s", url, e)
+        log_json(logger,
+            logging.DEBUG,
+            "HTTP/Network error fetching",
+            url=url,
+            error=str(e),
+        )
         raise
     except RequestException as e:  # IMPROVED: More specific exception handling
         logging.error("Request error occurred while fetching URL")
-        logging.debug("Request error fetching %s: %s", url, e)
+        log_json(logger,
+            logging.DEBUG,
+            "Request error fetching",
+            url=url,
+            error=str(e),
+        )
         raise
     except Exception as e:
         logging.error("Unexpected error occurred while fetching URL")
-        logging.debug("Unexpected error fetching %s: %s", url, e)
+        log_json(logger,
+            logging.DEBUG,
+            "Unexpected error fetching",
+            url=url,
+            error=str(e),
+        )
         raise
 
 
@@ -95,42 +117,61 @@ def get_page_content(url, retries=3, delay=5, timeout=10):
     """Fetch page content with retries and exponential backoff."""
     if not validate_url(url):  # ADDED: URL validation
         logging.error("Invalid URL provided")
-        logging.debug("Invalid URL provided: %s", url)
+        log_json(logger, logging.DEBUG, "Invalid URL provided", url=url)
         return None
     
     for attempt in range(retries):
         try:
             return fetch_url(url, timeout)
         except RequestException as e:  # IMPROVED: More specific exception handling
-            logging.warning(f'Request error fetching {url}: {e}, attempt {attempt + 1} of {retries}')
+            log_json(logger,
+                logging.WARNING,
+                "Request error fetching",
+                url=url,
+                error=str(e),
+                attempt=attempt + 1,
+                retries=retries,
+            )
             if attempt < retries - 1:  # Don't sleep on the last attempt
                 sleep_time = delay * (2 ** attempt)
                 logging.debug(f'Waiting {sleep_time} seconds before retry...')
                 time.sleep(sleep_time)
         except Exception as e:
             logging.error("Unexpected error occurred while fetching URL")
-            logging.debug("Unexpected error fetching %s: %s, attempt %d of %d", url, e, attempt + 1, retries)
+            log_json(logger,
+                logging.DEBUG,
+                "Unexpected error fetching",
+                url=url,
+                error=str(e),
+                attempt=attempt + 1,
+                retries=retries,
+            )
             if attempt < retries - 1:
                 time.sleep(delay * (2 ** attempt))
 
     logging.error("Failed to fetch URL after retries")
-    logging.debug("Failed to fetch %s after %d attempts", url, retries)
+    log_json(logger,
+        logging.DEBUG,
+        "Failed to fetch after retries",
+        url=url,
+        retries=retries,
+    )
     return None
 
 
 def scrape_text_data(url):
     """Scrape text data from the specified URL."""
-    logging.debug(f'Start scraping text data from {url}')
+    log_json(logger, logging.DEBUG, "Start scraping text data", url=url)
     
     if not validate_url(url):  # ADDED: URL validation
         logging.error("Invalid URL provided")
-        logging.debug("Invalid URL provided: %s", url)
+        log_json(logger, logging.DEBUG, "Invalid URL provided", url=url)
         return None
     
     page_content = get_page_content(url)
     if not page_content:
         logging.error("Failed to retrieve content from URL")
-        logging.debug("Failed to retrieve content from %s", url)
+        log_json(logger, logging.DEBUG, "Failed to retrieve content", url=url)
         return None
     
     try:
@@ -174,17 +215,31 @@ def scrape_text_data(url):
                     content.append(text)
         
         if not content:  # Fallback if no content found
-            logging.warning(f'No structured content found for {url}, using body text')
+            log_json(logger,
+                logging.WARNING,
+                "No structured content found",
+                url=url,
+            )
             body_text = soup.get_text(separator=' ', strip=True)
             content = [body_text] if body_text else ['No content found']
         
         full_content = f"Title: {title}\n\n" + "\n".join(content)
-        logging.debug(f'Scraped {len(content)} content elements from {url}')
+        log_json(logger,
+            logging.DEBUG,
+            "Scraped content elements",
+            url=url,
+            count=len(content),
+        )
         return full_content.strip()
-        
+
     except Exception as e:
         logging.error("Error parsing content from URL")
-        logging.debug("Error parsing content from %s: %s", url, e)
+        log_json(logger,
+            logging.DEBUG,
+            "Error parsing content",
+            url=url,
+            error=str(e),
+        )
         return None
 
 
@@ -255,14 +310,23 @@ def scrape_multiple_urls(urls, max_workers=3):  # IMPROVED: Reduced default work
                         results.append(result)
                     else:
                         failed_urls.append(url)
-                        logging.warning(f'No content scraped from {url}')
+                        log_json(logger,
+                            logging.WARNING,
+                            "No content scraped",
+                            url=url,
+                        )
                 except concurrent.futures.TimeoutError:
                     logging.error("Timeout occurred while scraping URL")
-                    logging.debug("Timeout scraping %s", url)
+                    log_json(logger, logging.DEBUG, "Timeout scraping", url=url)
                     failed_urls.append(url)
                 except Exception as e:
                     logging.error("Error occurred while scraping URL")
-                    logging.debug("Error scraping %s: %s", url, e)
+                    log_json(logger,
+                        logging.DEBUG,
+                        "Error scraping",
+                        url=url,
+                        error=str(e),
+                    )
                     failed_urls.append(url)
 
     except Exception as e:
@@ -273,7 +337,12 @@ def scrape_multiple_urls(urls, max_workers=3):  # IMPROVED: Reduced default work
     logging.info(f'Scraping completed: {success_count} successful, {len(failed_urls)} failed')
     
     if failed_urls:
-        logging.warning(f'Failed URLs: {failed_urls}')
+        sanitized_failed = [sanitize_url(u) for u in failed_urls]
+        log_json(logger,
+            logging.WARNING,
+            "Failed URLs",
+            urls=sanitized_failed,
+        )
     
     return results
 
