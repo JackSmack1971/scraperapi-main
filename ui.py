@@ -1,5 +1,8 @@
 import os
 import re
+import platform
+from pathlib import Path
+from urllib.parse import urlparse
 from kivy.app import App
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
@@ -10,166 +13,513 @@ from kivy.uix.popup import Popup
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.clock import Clock
+from kivy.clock import Clock, mainthread
+from kivy.utils import platform as kivy_platform
 import threading
 import logging
-from scraper import scrape_text_data, save_data_to_file, scrape_multiple_urls
-from utils import configure_logging
+import time
+from scraper import scrape_text_data, save_data_to_file, scrape_multiple_urls, validate_url
+from utils import configure_logging, get_logger
+
+
+def get_default_output_directory():
+    """Get the appropriate output directory based on the operating system."""
+    system_name = platform.system().lower()
+    
+    if kivy_platform == 'android' or (system_name == 'linux' and 'android' in platform.platform().lower()):
+        # Android path
+        return '/storage/emulated/0/ScraperApp/scraped_data'
+    elif system_name == 'windows':
+        # Windows: Documents folder
+        documents = os.path.join(os.path.expanduser('~'), 'Documents')
+        return os.path.join(documents, 'ScraperApp', 'scraped_data')
+    elif system_name == 'darwin':  # macOS
+        # macOS: Documents folder
+        return os.path.expanduser('~/Documents/ScraperApp/scraped_data')
+    else:  # Linux and other Unix-like systems
+        # Linux: Home directory
+        return os.path.expanduser('~/ScraperApp/scraped_data')
+
 
 class ScraperApp(App):
-    def build(self):
-        configure_logging()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.logger = get_logger(__name__)
         self.format_var = 'txt'
-        anchor_layout = AnchorLayout()
-
-        layout = BoxLayout(orientation='vertical', padding=10, spacing=10, size_hint=(0.8, 0.8))
+        self.scraping_thread = None
+        self.is_scraping = False
+        self.total_urls = 0
+        self.completed_urls = 0
+        self.failed_urls = []
         
-        header = Label(text='Web Scraping App', font_size=24, size_hint_y=None, height=50)
+    def build(self):
+        # Configure logging once at app start
+        configure_logging()
+        self.logger.info("ScraperApp initialized")
+        
+        anchor_layout = AnchorLayout()
+        layout = BoxLayout(
+            orientation='vertical', 
+            padding=10, 
+            spacing=10, 
+            size_hint=(0.9, 0.9)  # Increased from 0.8 for better screen usage
+        )
+        
+        # Header with better styling
+        header = Label(
+            text='Web Scraper Pro', 
+            font_size=28, 
+            size_hint_y=None, 
+            height=60,
+            color=(0.2, 0.6, 1, 1)  # Nice blue color
+        )
         layout.add_widget(header)
 
-        description = Label(text='Enter URLs separated by commas and choose the file format for the scraped data.', font_size=16, size_hint_y=None, height=60)
+        # Improved description with word wrapping
+        description = Label(
+            text='Enter URLs separated by commas or new lines. Select output format and start scraping.',
+            font_size=16, 
+            size_hint_y=None, 
+            height=80,
+            text_size=(None, None),  # Will be set in bind
+            halign='center',
+            valign='middle'
+        )
+        description.bind(size=self._update_text_size)
         layout.add_widget(description)
 
-        self.url_entry = TextInput(hint_text='Enter URLs separated by commas', multiline=True, font_size=14, size_hint_y=None, height=100)
+        # Improved URL input with better placeholder
+        self.url_entry = TextInput(
+            hint_text='Enter URLs (separated by commas or new lines)\nExample: https://example.com, https://another-site.com',
+            multiline=True, 
+            font_size=14, 
+            size_hint_y=None, 
+            height=120
+        )
         layout.add_widget(self.url_entry)
 
-        layout.add_widget(self.create_format_selection())
+        # Format selection
+        layout.add_widget(self._create_format_selection())
 
-        start_button = Button(text='Start Scraping', size_hint_y=None, height=50)
-        start_button.bind(on_press=self.start_scraping)
-        layout.add_widget(start_button)
+        # Action buttons
+        button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        
+        self.start_button = Button(text='Start Scraping', size_hint=(0.7, 1))
+        self.start_button.bind(on_press=self.start_scraping)
+        button_layout.add_widget(self.start_button)
+        
+        self.stop_button = Button(text='Stop', size_hint=(0.3, 1), disabled=True)
+        self.stop_button.bind(on_press=self.stop_scraping)
+        button_layout.add_widget(self.stop_button)
+        
+        layout.add_widget(button_layout)
 
-        self.progress_bar = ProgressBar(max=100, size_hint_y=None, height=30)
-        layout.add_widget(self.progress_bar)
+        # Progress indicators
+        progress_layout = BoxLayout(size_hint_y=None, height=60, spacing=5, orientation='vertical')
+        
+        self.progress_bar = ProgressBar(max=100, size_hint_y=None, height=20)
+        progress_layout.add_widget(self.progress_bar)
 
-        self.progress_label = Label(text='Waiting to start...', font_size=16, size_hint=(1, None), height=40)
-        layout.add_widget(self.progress_label)
+        self.progress_label = Label(
+            text='Ready to start scraping...', 
+            font_size=14, 
+            size_hint_y=None, 
+            height=40
+        )
+        progress_layout.add_widget(self.progress_label)
+        
+        layout.add_widget(progress_layout)
 
-        self.log_output = TextInput(readonly=True, multiline=True)
+        # Log output with improved styling
+        log_label = Label(text='Activity Log:', size_hint_y=None, height=30, halign='left')
+        log_label.bind(size=self._update_text_size)
+        layout.add_widget(log_label)
+        
+        self.log_output = TextInput(
+            readonly=True, 
+            multiline=True,
+            font_size=12,
+            background_color=(0.1, 0.1, 0.1, 1),
+            foreground_color=(0.9, 0.9, 0.9, 1)
+        )
         scroll_view = ScrollView(size_hint=(1, 1))
         scroll_view.add_widget(self.log_output)
         layout.add_widget(scroll_view)
 
-        layout.add_widget(self.create_footer())
+        # Footer
+        layout.add_widget(self._create_footer())
 
         anchor_layout.add_widget(layout)
-
         return anchor_layout
 
-    def create_format_selection(self):
-        format_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+    def _create_format_selection(self):
+        """Create format selection UI with improved layout."""
+        format_layout = BoxLayout(size_hint_y=None, height=50, spacing=20)
+        
+        format_label = Label(text='Output Format:', size_hint_x=None, width=120)
+        format_layout.add_widget(format_label)
 
-        txt_layout = BoxLayout(orientation='horizontal')
-        txt_checkbox = CheckBox(group='format')
+        # TXT option
+        txt_layout = BoxLayout(orientation='horizontal', size_hint_x=None, width=80, spacing=5)
+        txt_checkbox = CheckBox(group='format', active=True, size_hint_x=None, width=30)
         txt_checkbox.bind(active=self.set_format_txt)
-        txt_checkbox.active = True  # Default to txt
         txt_layout.add_widget(txt_checkbox)
-        txt_layout.add_widget(Label(text='TXT', font_size=16))
+        txt_layout.add_widget(Label(text='TXT', font_size=16, size_hint_x=None, width=50))
         format_layout.add_widget(txt_layout)
 
-        md_layout = BoxLayout(orientation='horizontal')
-        md_checkbox = CheckBox(group='format')
+        # MD option
+        md_layout = BoxLayout(orientation='horizontal', size_hint_x=None, width=80, spacing=5)
+        md_checkbox = CheckBox(group='format', size_hint_x=None, width=30)
         md_checkbox.bind(active=self.set_format_md)
         md_layout.add_widget(md_checkbox)
-        md_layout.add_widget(Label(text='MD', font_size=16))
+        md_layout.add_widget(Label(text='MD', font_size=16, size_hint_x=None, width=50))
         format_layout.add_widget(md_layout)
 
         return format_layout
 
-    def create_footer(self):
-        footer_layout = BoxLayout(size_hint_y=None, height=50, padding=[10, 10, 10, 10], spacing=10)
+    def _create_footer(self):
+        """Create footer with improved styling."""
+        footer_layout = BoxLayout(size_hint_y=None, height=60, padding=[10, 5, 10, 5], spacing=10)
         
-        help_button = Button(text='Help', size_hint=(0.2, 1), height=50)
+        help_button = Button(
+            text='Help', 
+            size_hint=(0.2, 1), 
+            background_color=(0.3, 0.7, 0.3, 1)
+        )
         help_button.bind(on_press=self.show_help)
         footer_layout.add_widget(help_button)
         
-        footer_label = Label(text='© 2024 ARTOfficial Intelligence LLC', size_hint=(0.8, 1), halign='center', valign='middle', font_size=14)
-        footer_label.bind(size=self.update_text_size)
+        settings_button = Button(
+            text='Settings', 
+            size_hint=(0.2, 1),
+            background_color=(0.7, 0.7, 0.3, 1)
+        )
+        settings_button.bind(on_press=self.show_settings)
+        footer_layout.add_widget(settings_button)
+        
+        footer_label = Label(
+            text='© 2024 ARTOfficial Intelligence LLC\nCross-Platform Web Scraper', 
+            size_hint=(0.6, 1), 
+            halign='center', 
+            valign='middle', 
+            font_size=12
+        )
+        footer_label.bind(size=self._update_text_size)
         footer_layout.add_widget(footer_label)
         
         return footer_layout
 
-    def update_text_size(self, instance, value):
-        instance.text_size = instance.size
+    def _update_text_size(self, instance, value):
+        """Update text size for proper word wrapping."""
+        instance.text_size = (instance.width, None)
 
     def show_help(self, instance):
-        help_content = Label(text='Enter the URLs separated by commas, select the format, and click "Start Scraping".',
-                             text_size=(400, None), halign='center', valign='middle')
-        help_content.bind(size=self.update_text_size)
-        popup = Popup(title='Help', content=help_content, size_hint=(0.8, 0.4))
+        """Show help dialog with comprehensive information."""
+        help_text = """WEB SCRAPER PRO - HELP
+
+How to use:
+1. Enter URLs in the text field (one per line or comma-separated)
+2. Choose output format (TXT or Markdown)
+3. Click 'Start Scraping' to begin
+4. Monitor progress in the activity log
+
+Supported URLs:
+• Must start with http:// or https://
+• Examples: https://example.com, http://news.site.com
+
+Output Location:
+• Files are saved to your Documents/ScraperApp folder
+• Each URL gets a separate file with timestamps
+• Failed URLs are logged for retry
+
+Tips:
+• Use STOP button to cancel ongoing scraping
+• Check activity log for detailed information
+• Large pages may take longer to process"""
+
+        content = Label(
+            text=help_text,
+            text_size=(400, None),
+            halign='left',
+            valign='top',
+            font_size=14
+        )
+        content.bind(size=self._update_text_size)
+        
+        popup = Popup(
+            title='Help - Web Scraper Pro', 
+            content=content, 
+            size_hint=(0.9, 0.8)
+        )
+        popup.open()
+
+    def show_settings(self, instance):
+        """Show settings dialog."""
+        settings_text = f"""CURRENT SETTINGS
+
+Output Directory:
+{get_default_output_directory()}
+
+Platform: {platform.system()}
+Python Version: {platform.python_version()}
+
+Logging:
+Level: {logging.getLevelName(self.logger.level)}
+File: Check logs directory for details
+
+To modify settings:
+• Edit environment variables
+• Check utils.py for configuration options"""
+
+        content = Label(
+            text=settings_text,
+            text_size=(400, None),
+            halign='left',
+            valign='top',
+            font_size=14
+        )
+        content.bind(size=self._update_text_size)
+        
+        popup = Popup(
+            title='Settings', 
+            content=content, 
+            size_hint=(0.8, 0.6)
+        )
         popup.open()
 
     def set_format_txt(self, checkbox, value):
+        """Set format to TXT."""
         if value:
             self.format_var = "txt"
-            logging.debug('Format set to TXT')
+            self.logger.debug('Format set to TXT')
 
     def set_format_md(self, checkbox, value):
+        """Set format to Markdown."""
         if value:
             self.format_var = "md"
-            logging.debug('Format set to MD')
+            self.logger.debug('Format set to MD')
 
+    @mainthread
     def update_progress(self, message, progress=None):
-        Clock.schedule_once(lambda dt: self._update_progress(message, progress))
-
-    def _update_progress(self, message, progress=None):
+        """Thread-safe progress update using @mainthread decorator."""
         self.progress_label.text = message
-        self.log_output.text += message + '\n'
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_output.text += f"[{timestamp}] {message}\n"
+        
+        # Auto-scroll to bottom
+        self.log_output.cursor = (len(self.log_output.text), 0)
+        
         if progress is not None:
             self.progress_bar.value = progress
-        logging.debug(message)
+        
+        self.logger.info(message)
+
+    @mainthread  
+    def update_ui_state(self, is_scraping):
+        """Thread-safe UI state update."""
+        self.start_button.disabled = is_scraping
+        self.stop_button.disabled = not is_scraping
+        self.is_scraping = is_scraping
 
     def start_scraping(self, instance):
-        logging.debug('Start Scraping button pressed')
-        self.update_progress('Initializing web scraping process...')
-        urls = [url.strip() for url in self.url_entry.text.split(',') if url.strip()]
-        file_format = self.format_var
-        logging.debug(f'URLs entered: {urls}')
-        logging.debug(f'File format selected: {file_format}')
-        if not urls:
-            logging.error('No URLs entered')
-            self.update_progress('No URLs entered. Please provide at least one URL.')
-            popup = Popup(title='Input Error', content=Label(text='Please enter at least one URL.'),
-                          size_hint=(0.8, 0.2))
-            popup.open()
+        """Start the scraping process with improved validation."""
+        if self.is_scraping:
+            self.logger.warning("Scraping already in progress")
             return
-        self.update_progress('Validating URLs...')
-        valid_urls = [url for url in urls if url.startswith('http')]
-        if not valid_urls:
-            self.update_progress('No valid URLs to scrape.')
-            return
-        logging.debug('Starting thread for scrape_and_save')
-        self.update_progress('Starting scraping...')
-        threading.Thread(target=self.scrape_and_save, args=(valid_urls, file_format)).start()
 
-    def scrape_and_save(self, urls, file_format):
-        logging.debug('Scraping and saving started')
-        total_urls = len(urls)
-        base_directory = '/storage/emulated/0/latest scraper/all_scraped_data'
+        self.logger.info('Start Scraping button pressed')
         
-        # Ensure the base directory exists
-        if not os.path.exists(base_directory):
-            os.makedirs(base_directory)
+        # Parse and validate URLs
+        url_text = self.url_entry.text.strip()
+        if not url_text:
+            self._show_error_popup('Input Error', 'Please enter at least one URL.')
+            return
 
-        for index, url in enumerate(urls):
-            progress = ((index + 1) / total_urls) * 100
-            logging.debug(f'Scraping URL: {url}')
-            self.update_progress(f'Starting to scrape URL: {url}', progress)
-            scraped_data = scrape_text_data(url)
-            if scraped_data:
-                sanitized_url = re.sub(r'[^a-zA-Z0-9]', '_', url)
-                # Generate a unique filename
-                filename = f'{sanitized_url}_{index + 1}.{file_format}'
-                file_path = os.path.join(base_directory, filename)
-                logging.debug(f'Saving scraped data to file: {file_path}')
-                save_data_to_file(scraped_data, filename=file_path, file_format=file_format)
-                self.update_progress(f'Data successfully scraped from {url}. Saving to {file_path}...', progress)
-                self.update_progress(f'Data saved to {file_path}.', progress)
+        # Support both comma and newline separation
+        urls = []
+        for url in re.split(r'[,\n]+', url_text):
+            url = url.strip()
+            if url:
+                urls.append(url)
+
+        if not urls:
+            self._show_error_popup('Input Error', 'No valid URLs found.')
+            return
+
+        # Validate URLs
+        valid_urls = []
+        invalid_urls = []
+        
+        for url in urls:
+            if validate_url(url):
+                valid_urls.append(url)
             else:
-                logging.error(f'No data scraped from {url}')
-                self.update_progress(f'No data found at {url}.', progress)
-        self.update_progress(f'All URLs processed successfully. Scraping completed. Files saved to {base_directory}', 100)
+                invalid_urls.append(url)
+
+        if invalid_urls:
+            invalid_list = '\n'.join(invalid_urls[:5])  # Show first 5
+            if len(invalid_urls) > 5:
+                invalid_list += f'\n... and {len(invalid_urls) - 5} more'
+            
+            self._show_error_popup(
+                'Invalid URLs Found', 
+                f'The following URLs are invalid and will be skipped:\n\n{invalid_list}'
+            )
+
+        if not valid_urls:
+            self._show_error_popup('No Valid URLs', 'All URLs are invalid. Please check the format.')
+            return
+
+        # Initialize progress tracking
+        self.total_urls = len(valid_urls)
+        self.completed_urls = 0
+        self.failed_urls = []
+
+        # Update UI and start scraping
+        self.update_ui_state(True)
+        self.update_progress(f'Starting to scrape {len(valid_urls)} URLs...', 0)
+        
+        self.logger.info(f'Starting scraping thread for {len(valid_urls)} URLs')
+        self.scraping_thread = threading.Thread(
+            target=self._scrape_and_save, 
+            args=(valid_urls, self.format_var),
+            daemon=True  # Daemon thread will exit when main thread exits
+        )
+        self.scraping_thread.start()
+
+    def stop_scraping(self, instance):
+        """Stop the scraping process."""
+        if not self.is_scraping:
+            return
+            
+        self.logger.info('Stop requested by user')
+        self.update_progress('Stopping scraping process...', None)
+        
+        # Note: This is a soft stop - we can't forcefully kill threads in Python
+        # The thread will complete the current URL and then check if it should continue
+        self.is_scraping = False
+        self.update_ui_state(False)
+
+    def _show_error_popup(self, title, message):
+        """Show error popup with improved styling."""
+        content = Label(
+            text=message,
+            text_size=(350, None),
+            halign='center',
+            valign='middle'
+        )
+        content.bind(size=self._update_text_size)
+        
+        popup = Popup(title=title, content=content, size_hint=(0.8, 0.4))
+        popup.open()
+
+    def _generate_filename(self, url, index, file_format):
+        """Generate a safe filename from URL."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.replace('www.', '')
+            
+            # Create safe filename
+            safe_domain = re.sub(r'[^\w\-_.]', '_', domain)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"{safe_domain}_{timestamp}_{index:03d}.{file_format}"
+            
+            return filename
+        except Exception as e:
+            self.logger.error(f"Error generating filename for {url}: {e}")
+            # Fallback filename
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            return f"scraped_{timestamp}_{index:03d}.{file_format}"
+
+    def _scrape_and_save(self, urls, file_format):
+        """Scrape URLs and save data (runs in background thread)."""
+        self.logger.info('Background scraping thread started')
+        
+        try:
+            # Ensure output directory exists
+            base_directory = get_default_output_directory()
+            Path(base_directory).mkdir(parents=True, exist_ok=True)
+            
+            self.update_progress(f'Created output directory: {base_directory}')
+
+            for index, url in enumerate(urls):
+                # Check if we should stop
+                if not self.is_scraping:
+                    self.update_progress('Scraping stopped by user.', None)
+                    break
+
+                progress = ((index + 1) / self.total_urls) * 100
+                self.update_progress(f'Scraping URL {index + 1}/{self.total_urls}: {url[:50]}...', progress)
+                
+                try:
+                    # Scrape the URL
+                    scraped_data = scrape_text_data(url)
+                    
+                    if scraped_data and scraped_data.strip():
+                        # Generate filename
+                        filename = self._generate_filename(url, index + 1, file_format)
+                        file_path = os.path.join(base_directory, filename)
+                        
+                        # Save data
+                        if save_data_to_file(scraped_data, file_path, file_format):
+                            self.completed_urls += 1
+                            self.update_progress(f'✓ Saved: {filename} ({len(scraped_data)} chars)', progress)
+                        else:
+                            self.failed_urls.append(url)
+                            self.update_progress(f'✗ Failed to save data for: {url}', progress)
+                    else:
+                        self.failed_urls.append(url)
+                        self.update_progress(f'✗ No data found at: {url}', progress)
+                        
+                except Exception as e:
+                    self.failed_urls.append(url)
+                    self.logger.error(f'Error scraping {url}: {e}')
+                    self.update_progress(f'✗ Error scraping {url}: {str(e)[:50]}...', progress)
+                
+                # Small delay to prevent overwhelming servers
+                time.sleep(1)
+
+            # Final summary
+            success_count = self.completed_urls
+            failed_count = len(self.failed_urls)
+            
+            summary_message = f'Scraping completed! ✓ {success_count} successful, ✗ {failed_count} failed'
+            if failed_count > 0:
+                summary_message += f'\nFailed URLs: {", ".join(self.failed_urls[:3])}'
+                if failed_count > 3:
+                    summary_message += f'... and {failed_count - 3} more'
+            
+            summary_message += f'\nFiles saved to: {base_directory}'
+            
+            self.update_progress(summary_message, 100)
+            
+        except Exception as e:
+            self.logger.error(f'Critical error in scraping thread: {e}')
+            self.update_progress(f'Critical error: {str(e)}', None)
+        
+        finally:
+            # Reset UI state
+            self.update_ui_state(False)
+            self.logger.info('Background scraping thread completed')
+
+    def on_stop(self):
+        """Called when the app is about to close."""
+        self.logger.info('App stopping')
+        if self.is_scraping and self.scraping_thread:
+            self.logger.info('Stopping scraping thread')
+            self.is_scraping = False
+            # Give thread a moment to finish gracefully
+            if self.scraping_thread.is_alive():
+                self.scraping_thread.join(timeout=2)
+        return True
+
 
 if __name__ == '__main__':
-    configure_logging()
-    ScraperApp().run()
+    try:
+        app = ScraperApp()
+        app.run()
+    except Exception as e:
+        # Fallback logging if app fails to start
+        print(f"Failed to start ScraperApp: {e}")
+        logging.error(f"Failed to start ScraperApp: {e}")
+        raise
