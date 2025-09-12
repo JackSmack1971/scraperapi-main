@@ -3,6 +3,8 @@ import requests
 import random
 import logging
 import time
+import socket
+import ipaddress
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry  # FIXED: Updated import path
@@ -52,13 +54,32 @@ def get_random_user_agent():
 
 
 def validate_url(url):
-    """Validate URL format and scheme."""
+    """Validate URL format, scheme, hostname, IP address, and port."""
     try:
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(f"Invalid URL format: {url}")
-        if parsed.scheme not in ['http', 'https']:
+        if parsed.scheme not in ["http", "https"]:
             raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        if parsed.port not in (None, 80, 443):
+            raise ValueError(f"Disallowed port: {parsed.port}")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Missing hostname")
+
+        try:
+            infos = socket.getaddrinfo(hostname, None)
+        except socket.gaierror as e:
+            raise ValueError(f"DNS resolution failed for {hostname}") from e
+
+        for info in infos:
+            ip_str = info[4][0]
+            ip_obj = ipaddress.ip_address(ip_str)
+            if ip_obj.is_private or ip_obj.is_loopback:
+                raise ValueError(f"Forbidden IP address: {ip_str}")
+
         return True
     except Exception as e:
         logging.error("URL validation failed")
