@@ -4,7 +4,6 @@ from utils import configure_logging  # Ensure this import is present
 
 # Load environment variables from .env file
 load_dotenv()
-
 configure_logging()
 
 from kivy.config import Config
@@ -25,5 +24,5 @@ def main():
     finally:
         logging.info('ScraperApp ended')
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # FIXED: Changed **name** to __name__
     main()
