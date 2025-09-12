@@ -20,7 +20,7 @@ if not API_KEY:
     logging.error("SCRAPER_API_KEY environment variable is required")
     raise ValueError("SCRAPER_API_KEY environment variable must be set")
 
-SCRAPERAPI_URL = f'http://api.scraperapi.com?api_key={API_KEY}&url='
+SCRAPERAPI_URL = f'https://api.scraperapi.com?api_key={API_KEY}&url='
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
