@@ -1,0 +1,8 @@
+Contact: mailto:security@artofficial-intelligence.com
+Contact: https://github.com/JackSmack1971/web-scraper-pro/security/advisories/new
+Encryption: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x1234567890ABCDEF
+Policy: https://github.com/JackSmack1971/web-scraper-pro/blob/main/SECURITY.md
+Acknowledgments: https://github.com/JackSmack1971/web-scraper-pro/security/advisories
+Preferred-Languages: en, es, fr
+Expires: 2025-12-31T23:59:59.000Z
+Canonical: https://artofficial-intelligence.com/.well-known/security.txt
