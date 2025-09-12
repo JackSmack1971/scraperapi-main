@@ -142,6 +142,7 @@ chore(deps): update requests to 2.28.1
 - [ ] Documentation updated for user-facing changes
 - [ ] Application starts and runs without errors
 - [ ] No hardcoded secrets or API keys
+- [ ] `pip-audit` run with no vulnerabilities reported
 
 ### PR Template Checklist
 When you submit a PR, please:
