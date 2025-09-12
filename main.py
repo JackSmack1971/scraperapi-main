@@ -20,7 +20,8 @@ def main():
     try:
         ScraperApp().run()
     except Exception as e:
-        logging.error(f'Application error: {e}', exc_info=True)
+        logging.error('Application encountered an error')
+        logging.debug('Application error: %s', e, exc_info=True)
     finally:
         logging.info('ScraperApp ended')
 
