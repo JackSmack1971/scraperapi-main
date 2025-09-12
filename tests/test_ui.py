@@ -29,7 +29,8 @@ def test_generate_filename_sanitizes_domain(monkeypatch):
 def test_scrape_and_save_rejects_outside_path(monkeypatch, tmp_path):
     app = ScraperApp()
     app.update_progress = lambda *args, **kwargs: None
-    app.is_scraping = True
+    with app.state_lock:
+        app.is_scraping = True
     app.total_urls = 1
     app.completed_urls = 0
     app.failed_urls = []

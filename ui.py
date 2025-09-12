@@ -47,7 +47,9 @@ class ScraperApp(App):
         self.logger = get_logger(__name__)
         self.format_var = 'txt'
         self.scraping_thread = None
-        self.is_scraping = False
+        self.state_lock = threading.Lock()
+        with self.state_lock:
+            self.is_scraping = False
         self.total_urls = 0
         self.completed_urls = 0
         self.failed_urls = []
@@ -319,11 +321,14 @@ To modify settings:
         """Thread-safe UI state update."""
         self.start_button.disabled = is_scraping
         self.stop_button.disabled = not is_scraping
-        self.is_scraping = is_scraping
+        with self.state_lock:
+            self.is_scraping = is_scraping
 
     def start_scraping(self, instance):
         """Start the scraping process with improved validation."""
-        if self.is_scraping:
+        with self.state_lock:
+            currently_scraping = self.is_scraping
+        if currently_scraping:
             self.logger.warning("Scraping already in progress")
             return
 
@@ -389,7 +394,9 @@ To modify settings:
 
     def stop_scraping(self, instance):
         """Stop the scraping process."""
-        if not self.is_scraping:
+        with self.state_lock:
+            currently_scraping = self.is_scraping
+        if not currently_scraping:
             return
             
         self.logger.info('Stop requested by user')
@@ -397,7 +404,8 @@ To modify settings:
         
         # Note: This is a soft stop - we can't forcefully kill threads in Python
         # The thread will complete the current URL and then check if it should continue
-        self.is_scraping = False
+        with self.state_lock:
+            self.is_scraping = False
         self.update_ui_state(False)
 
     def _show_error_popup(self, title, message):
@@ -445,7 +453,9 @@ To modify settings:
 
             for index, url in enumerate(urls):
                 # Check if we should stop
-                if not self.is_scraping:
+                with self.state_lock:
+                    continue_scraping = self.is_scraping
+                if not continue_scraping:
                     self.update_progress('Scraping stopped by user.', None)
                     break
 
@@ -519,9 +529,12 @@ To modify settings:
     def on_stop(self):
         """Called when the app is about to close."""
         self.logger.info('App stopping')
-        if self.is_scraping and self.scraping_thread:
+        with self.state_lock:
+            active = self.is_scraping
+        if active and self.scraping_thread:
             self.logger.info('Stopping scraping thread')
-            self.is_scraping = False
+            with self.state_lock:
+                self.is_scraping = False
             # Give thread a moment to finish gracefully
             if self.scraping_thread.is_alive():
                 self.scraping_thread.join(timeout=2)
