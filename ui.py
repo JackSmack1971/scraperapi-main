@@ -419,8 +419,8 @@ To modify settings:
             parsed = urlparse(url)
             domain = parsed.netloc.replace('www.', '')
             
-            # Create safe filename
-            safe_domain = re.sub(r'[^\w\-_.]', '_', domain)
+            # Create safe filename without dots to prevent traversal
+            safe_domain = re.sub(r'[^\w\-_]', '_', domain)
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             filename = f"{safe_domain}_{timestamp}_{index:03d}.{file_format}"
             
@@ -460,11 +460,22 @@ To modify settings:
                         # Generate filename
                         filename = self._generate_filename(url, index + 1, file_format)
                         file_path = os.path.join(base_directory, filename)
-                        
+                        abs_base = os.path.abspath(base_directory)
+                        abs_path = os.path.abspath(file_path)
+                        if os.path.commonpath([abs_base, abs_path]) != abs_base:
+                            self.failed_urls.append(url)
+                            self.logger.error(
+                                "Invalid file path outside base directory: %s", abs_path
+                            )
+                            self.update_progress('✗ Invalid file path', progress)
+                            continue
+
                         # Save data
                         if save_data_to_file(scraped_data, file_path, file_format):
                             self.completed_urls += 1
-                            self.update_progress(f'✓ Saved: {filename} ({len(scraped_data)} chars)', progress)
+                            self.update_progress(
+                                f'✓ Saved: {filename} ({len(scraped_data)} chars)', progress
+                            )
                         else:
                             self.failed_urls.append(url)
                             self.update_progress(f'✗ Failed to save data for: {url}', progress)
