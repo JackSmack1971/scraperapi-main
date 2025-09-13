@@ -19,3 +19,9 @@ def test_unusual_port_rejected():
 
 def test_valid_url_allowed():
     assert scraper.validate_url("http://example.com")
+
+
+def test_non_http_scheme_rejected():
+    assert not scraper.validate_url("ftp://example.com")
+    assert not scraper.validate_url("javascript:alert(1)")
+    assert not scraper.validate_url("file:///etc/passwd")
