@@ -1,11 +1,13 @@
+import json
 import logging
 import os
 import platform
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from kivy.app import App
@@ -19,6 +21,7 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.textinput import TextInput
 from kivy.utils import platform as kivy_platform
 
@@ -135,6 +138,167 @@ class EnhancedURLInput(BoxLayout):
         """Return currently valid URLs."""
         self._validate_urls()
         return list(self.valid_urls)
+
+
+class ConfigurationManager(BoxLayout):
+    """Manage configuration settings and templates."""
+
+    default_config: Dict[str, Any] = {
+        "output_format": "txt",  # Validated: 'txt' or 'md'
+        "concurrent_workers": 3,  # Range: 1-10
+        "request_timeout": 10,  # Seconds: 1-60
+        "retry_attempts": 3,  # Range: 1-10
+        "auto_scroll_log": True,  # Boolean
+        "filename_template": "{domain}_{timestamp}_{index}",  # String template
+        "create_subdirectories": False,  # Boolean
+    }
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(orientation="vertical", **kwargs)
+        self.logger = get_logger(__name__)
+        self.config: Dict[str, Any] = dict(self.default_config)
+        self._config_dir = self._get_config_directory()
+
+        # Simple button to open settings dialog
+        settings_btn = Button(text="Settings", size_hint=(1, None), height=40)
+        settings_btn.bind(on_press=lambda *_: self.open_settings())  # type: ignore
+        self.add_widget(settings_btn)
+
+    def _get_config_directory(self) -> str:
+        """Return path to configuration directory, creating it securely."""
+        base = Path(get_default_output_directory()).expanduser()
+        config_dir = base.parent / "config_templates"
+        try:
+            # Security: restrict permissions to user-only where supported
+            config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        except Exception as exc:  # Broad catch to avoid leaking details
+            self.logger.error("Failed to create config directory: %s", exc)
+        return str(config_dir)
+
+    def _sanitize_name(self, name: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_-]", "_", name)
+
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        if config.get("output_format") not in {"txt", "md"}:
+            raise ValueError("Invalid output_format")
+        workers = int(config.get("concurrent_workers", 0))
+        if not 1 <= workers <= 10:
+            raise ValueError("concurrent_workers out of range")
+        timeout = int(config.get("request_timeout", 0))
+        if not 1 <= timeout <= 60:
+            raise ValueError("request_timeout out of range")
+        retries = int(config.get("retry_attempts", 0))
+        if not 1 <= retries <= 10:
+            raise ValueError("retry_attempts out of range")
+        if not isinstance(config.get("auto_scroll_log"), bool):
+            raise ValueError("auto_scroll_log must be boolean")
+        if not isinstance(config.get("filename_template"), str):
+            raise ValueError("filename_template must be string")
+        if not isinstance(config.get("create_subdirectories"), bool):
+            raise ValueError("create_subdirectories must be boolean")
+
+    def _save_template(self, name: str) -> bool:
+        """Persist current config as JSON template."""
+        safe_name = self._sanitize_name(name)
+        if not safe_name:
+            self.logger.error("Invalid template name")
+            return False
+        data = {
+            "name": safe_name,
+            "created": datetime.utcnow().isoformat() + "Z",
+            "config": self.config,
+        }
+        try:
+            path = Path(self._config_dir) / f"{safe_name}.json"
+            with path.open("w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+            return True
+        except Exception as exc:
+            self.logger.error("Failed to save template: %s", exc)
+            return False
+
+    def open_settings(self) -> None:
+        panel = TabbedPanel(do_default_tab=False)
+
+        # General tab
+        general_box = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        self.output_format_input = TextInput(text=self.config["output_format"])
+        general_box.add_widget(Label(text="Output Format (txt/md)"))
+        general_box.add_widget(self.output_format_input)
+
+        self.auto_scroll_checkbox = CheckBox(active=self.config["auto_scroll_log"])
+        auto_layout = BoxLayout(size_hint_y=None, height=30)
+        auto_layout.add_widget(Label(text="Auto scroll log", size_hint_x=0.7))
+        auto_layout.add_widget(self.auto_scroll_checkbox)
+        general_box.add_widget(auto_layout)
+
+        self.template_input = TextInput(text=self.config["filename_template"])
+        general_box.add_widget(Label(text="Filename template"))
+        general_box.add_widget(self.template_input)
+
+        general_tab = TabbedPanelItem(text="General")
+        general_tab.content = general_box
+        panel.add_widget(general_tab)
+
+        # Advanced tab
+        advanced_box = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        self.workers_input = TextInput(
+            text=str(self.config["concurrent_workers"]), input_filter="int"
+        )
+        advanced_box.add_widget(Label(text="Concurrent workers"))
+        advanced_box.add_widget(self.workers_input)
+
+        self.timeout_input = TextInput(
+            text=str(self.config["request_timeout"]), input_filter="int"
+        )
+        advanced_box.add_widget(Label(text="Request timeout (s)"))
+        advanced_box.add_widget(self.timeout_input)
+
+        self.retry_input = TextInput(
+            text=str(self.config["retry_attempts"]), input_filter="int"
+        )
+        advanced_box.add_widget(Label(text="Retry attempts"))
+        advanced_box.add_widget(self.retry_input)
+
+        self.subdir_checkbox = CheckBox(
+            active=self.config["create_subdirectories"], size_hint_x=None
+        )
+        subdir_layout = BoxLayout(size_hint_y=None, height=30)
+        subdir_layout.add_widget(Label(text="Create subdirectories", size_hint_x=0.7))
+        subdir_layout.add_widget(self.subdir_checkbox)
+        advanced_box.add_widget(subdir_layout)
+
+        advanced_tab = TabbedPanelItem(text="Advanced")
+        advanced_tab.content = advanced_box
+        panel.add_widget(advanced_tab)
+
+        # Root layout with save button
+        root = BoxLayout(orientation="vertical")
+        root.add_widget(panel)
+        save_btn = Button(text="Apply", size_hint_y=None, height=40)
+        root.add_widget(save_btn)
+        popup = Popup(title="Advanced Settings", content=root, size_hint=(0.9, 0.9))
+        save_btn.bind(on_press=lambda *_: self._apply_settings(popup))  # type: ignore
+        popup.open()
+
+    def _apply_settings(self, popup: Popup) -> None:
+        new_config = {
+            "output_format": self.output_format_input.text.strip(),
+            "concurrent_workers": int(self.workers_input.text or 0),
+            "request_timeout": int(self.timeout_input.text or 0),
+            "retry_attempts": int(self.retry_input.text or 0),
+            "auto_scroll_log": bool(self.auto_scroll_checkbox.active),
+            "filename_template": self.template_input.text.strip(),
+            "create_subdirectories": bool(self.subdir_checkbox.active),
+        }
+        try:
+            self._validate_config(new_config)
+        except ValueError as exc:
+            self.logger.error("Invalid configuration: %s", exc)
+            return
+        self.config.update(new_config)
+        self._save_template("autosave")
+        popup.dismiss()
 
 
 class ScraperApp(App):
