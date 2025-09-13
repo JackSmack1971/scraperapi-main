@@ -5,7 +5,7 @@ import logging
 import time
 import socket
 import ipaddress
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry  # FIXED: Updated import path
 from requests.exceptions import HTTPError, Timeout, TooManyRedirects, RequestException
@@ -260,8 +260,15 @@ def scrape_text_data(url):
         # Try to find main content area first
         main_content = soup.find(['article', 'main']) or soup.find(class_=['content', 'main-content']) or soup.find(id=['content', 'main-content'])
         search_area = main_content if main_content else soup
-        
-        for tag in search_area.select(', '.join(content_selectors[4:])):  # Skip container selectors for individual elements
+
+        selectors = ', '.join(content_selectors[4:])
+        # SECURITY: ensure search_area is a BeautifulSoup Tag to prevent attribute errors
+        if isinstance(search_area, (Tag, BeautifulSoup)):
+            tags = search_area.select(selectors)
+        else:
+            tags = []
+
+        for tag in tags:  # Skip container selectors for individual elements
             if tag.name in ['script', 'style', 'nav', 'header', 'footer']:  # Skip unwanted elements
                 continue
                 
