@@ -5,7 +5,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 os.environ.setdefault("SCRAPER_API_KEY", "test")
 
-import logging
+import logging  # noqa: E402
+import threading  # noqa: E402
+from typing import Optional  # noqa: E402
 import ui  # noqa: E402
 from ui import ScraperApp  # noqa: E402
 
@@ -62,14 +64,16 @@ def test_scrape_and_save_rejects_outside_path(monkeypatch, tmp_path):
 def test_on_stop_logs_when_thread_does_not_terminate(caplog):
     app = ScraperApp()
 
-    class DummyThread:
+    class DummyThread(threading.Thread):
         def __init__(self):
-            self.join_timeout = None
+            super().__init__()
+            # mirror Thread.join timeout parameter for inspection
+            self.join_timeout: Optional[float] = None
 
-        def join(self, timeout=None):
+        def join(self, timeout: Optional[float] = None) -> None:
             self.join_timeout = timeout
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             return True
 
     app.scraping_thread = DummyThread()
