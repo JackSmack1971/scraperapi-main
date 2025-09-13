@@ -212,6 +212,14 @@ export SCRAPER_LOG_LEVEL=DEBUG
 python main.py
 ```
 
+### Log File Permissions
+
+On Unix-like systems the application restricts log files to owner read/write
+permissions (`0600`) to help protect sensitive data. Windows does not enforce
+Unix-style permissions; the application attempts to set permissions and logs a
+debug message if it cannot. Set `SCRAPER_ENV=development` to enable a
+verification step that warns when the expected permissions are not applied.
+
 ---
 
 *Generated on 2025-01-16T02:47:23Z*
