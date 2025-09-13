@@ -2,6 +2,7 @@ import os
 import re
 import platform
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from kivy.app import App
 from kivy.uix.label import Label
@@ -82,7 +83,10 @@ class ScraperApp(App):
 
         # Improved description with word wrapping
         description = Label(
-            text="Enter URLs separated by commas or new lines. Select output format and start scraping.",
+            text=(
+                "Enter URLs separated by commas or new lines. "
+                "Select output format and start scraping."
+            ),
             font_size=16,
             size_hint_y=None,
             height=80,
@@ -90,12 +94,15 @@ class ScraperApp(App):
             halign="center",
             valign="middle",
         )
-        description.bind(size=self._update_text_size)
+        description.bind(size=self._update_text_size)  # type: ignore
         layout.add_widget(description)
 
         # Improved URL input with better placeholder
         self.url_entry = TextInput(
-            hint_text="Enter URLs (separated by commas or new lines)\nExample: https://example.com, https://another-site.com",
+            hint_text=(
+                "Enter URLs (separated by commas or new lines)\n"
+                "Example: https://example.com, https://another-site.com"
+            ),
             multiline=True,
             font_size=14,
             size_hint_y=None,
@@ -110,11 +117,11 @@ class ScraperApp(App):
         button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
 
         self.start_button = Button(text="Start Scraping", size_hint=(0.7, 1))
-        self.start_button.bind(on_press=self.start_scraping)
+        self.start_button.bind(on_press=self.start_scraping)  # type: ignore
         button_layout.add_widget(self.start_button)
 
         self.stop_button = Button(text="Stop", size_hint=(0.3, 1), disabled=True)
-        self.stop_button.bind(on_press=self.stop_scraping)
+        self.stop_button.bind(on_press=self.stop_scraping)  # type: ignore
         button_layout.add_widget(self.stop_button)
 
         layout.add_widget(button_layout)
@@ -138,7 +145,7 @@ class ScraperApp(App):
         log_label = Label(
             text="Activity Log:", size_hint_y=None, height=30, halign="left"
         )
-        log_label.bind(size=self._update_text_size)
+        log_label.bind(size=self._update_text_size)  # type: ignore
         layout.add_widget(log_label)
 
         self.log_output = TextInput(
@@ -170,7 +177,7 @@ class ScraperApp(App):
             orientation="horizontal", size_hint_x=None, width=80, spacing=5
         )
         txt_checkbox = CheckBox(group="format", active=True, size_hint_x=None, width=30)
-        txt_checkbox.bind(active=self.set_format_txt)
+        txt_checkbox.bind(active=self.set_format_txt)  # type: ignore
         txt_layout.add_widget(txt_checkbox)
         txt_layout.add_widget(
             Label(text="TXT", font_size=16, size_hint_x=None, width=50)
@@ -182,7 +189,7 @@ class ScraperApp(App):
             orientation="horizontal", size_hint_x=None, width=80, spacing=5
         )
         md_checkbox = CheckBox(group="format", size_hint_x=None, width=30)
-        md_checkbox.bind(active=self.set_format_md)
+        md_checkbox.bind(active=self.set_format_md)  # type: ignore
         md_layout.add_widget(md_checkbox)
         md_layout.add_widget(Label(text="MD", font_size=16, size_hint_x=None, width=50))
         format_layout.add_widget(md_layout)
@@ -198,13 +205,13 @@ class ScraperApp(App):
         help_button = Button(
             text="Help", size_hint=(0.2, 1), background_color=(0.3, 0.7, 0.3, 1)
         )
-        help_button.bind(on_press=self.show_help)
+        help_button.bind(on_press=self.show_help)  # type: ignore
         footer_layout.add_widget(help_button)
 
         settings_button = Button(
             text="Settings", size_hint=(0.2, 1), background_color=(0.7, 0.7, 0.3, 1)
         )
-        settings_button.bind(on_press=self.show_settings)
+        settings_button.bind(on_press=self.show_settings)  # type: ignore
         footer_layout.add_widget(settings_button)
 
         footer_label = Label(
@@ -214,16 +221,16 @@ class ScraperApp(App):
             valign="middle",
             font_size=12,
         )
-        footer_label.bind(size=self._update_text_size)
+        footer_label.bind(size=self._update_text_size)  # type: ignore
         footer_layout.add_widget(footer_label)
 
         return footer_layout
 
-    def _update_text_size(self, instance, value):
+    def _update_text_size(self, instance: Label, value: Any) -> None:
         """Update text size for proper word wrapping."""
         instance.text_size = (instance.width, None)
 
-    def show_help(self, instance):
+    def show_help(self, instance: Button) -> None:
         """Show help dialog with comprehensive information."""
         help_text = """WEB SCRAPER PRO - HELP
 
@@ -254,14 +261,14 @@ Tips:
             valign="top",
             font_size=14,
         )
-        content.bind(size=self._update_text_size)
+        content.bind(size=self._update_text_size)  # type: ignore
 
         popup = Popup(
             title="Help - Web Scraper Pro", content=content, size_hint=(0.9, 0.8)
         )
         popup.open()
 
-    def show_settings(self, instance):
+    def show_settings(self, instance: Button) -> None:
         """Show settings dialog."""
         settings_text = f"""CURRENT SETTINGS
 
@@ -286,18 +293,18 @@ To modify settings:
             valign="top",
             font_size=14,
         )
-        content.bind(size=self._update_text_size)
+        content.bind(size=self._update_text_size)  # type: ignore
 
         popup = Popup(title="Settings", content=content, size_hint=(0.8, 0.6))
         popup.open()
 
-    def set_format_txt(self, checkbox, value):
+    def set_format_txt(self, checkbox: CheckBox, value: bool) -> None:
         """Set format to TXT."""
         if value:
             self.format_var = "txt"
             self.logger.debug("Format set to TXT")
 
-    def set_format_md(self, checkbox, value):
+    def set_format_md(self, checkbox: CheckBox, value: bool) -> None:
         """Set format to Markdown."""
         if value:
             self.format_var = "md"
@@ -326,7 +333,7 @@ To modify settings:
         with self.state_lock:
             self.is_scraping = is_scraping
 
-    def start_scraping(self, instance):
+    def start_scraping(self, instance: Button) -> None:
         """Start the scraping process with improved validation."""
         with self.state_lock:
             currently_scraping = self.is_scraping
@@ -399,7 +406,7 @@ To modify settings:
         )
         self.scraping_thread.start()
 
-    def stop_scraping(self, instance):
+    def stop_scraping(self, instance: Button) -> None:
         """Stop the scraping process."""
         with self.state_lock:
             currently_scraping = self.is_scraping
@@ -421,7 +428,7 @@ To modify settings:
         content = Label(
             text=message, text_size=(350, None), halign="center", valign="middle"
         )
-        content.bind(size=self._update_text_size)
+        content.bind(size=self._update_text_size)  # type: ignore
 
         popup = Popup(title=title, content=content, size_hint=(0.8, 0.4))
         popup.open()
@@ -527,7 +534,10 @@ To modify settings:
             success_count = self.completed_urls
             failed_count = len(self.failed_urls)
 
-            summary_message = f"Scraping completed! ✓ {success_count} successful, ✗ {failed_count} failed"
+            summary_message = (
+                f"Scraping completed! ✓ {success_count} successful, "
+                f"✗ {failed_count} failed"
+            )
             if failed_count > 0:
                 summary_message += f'\nFailed URLs: {", ".join(self.failed_urls[:3])}'
                 if failed_count > 3:
