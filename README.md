@@ -97,6 +97,12 @@ This sequence shows the core scraping workflow from user input to file output.
    echo "KIVY_FULLSCREEN=auto" >> .env
    echo "KIVY_WIDTH=800" >> .env
    echo "KIVY_HEIGHT=600" >> .env
+   # Optional network tuning
+   echo "SCRAPER_RETRY_TOTAL=5" >> .env
+   echo "SCRAPER_BACKOFF_FACTOR=1" >> .env
+   echo "SCRAPER_TIMEOUT=10" >> .env
+   echo "SCRAPER_PAGE_RETRIES=3" >> .env
+   echo "SCRAPER_RETRY_DELAY=5" >> .env
    ```
 
 ### Verification
@@ -137,6 +143,11 @@ python main.py
 | `KIVY_HEIGHT` | Window height | `600` |
 | `SCRAPER_LOG_LEVEL` | Logging level | `INFO` |
 | `SCRAPER_LOG_DIR` | Log directory | Platform-specific |
+| `SCRAPER_RETRY_TOTAL` | Max retry attempts for requests | `5` |
+| `SCRAPER_BACKOFF_FACTOR` | Exponential backoff factor | `1` |
+| `SCRAPER_TIMEOUT` | Request timeout in seconds | `10` |
+| `SCRAPER_PAGE_RETRIES` | Retries for page fetch helper | `3` |
+| `SCRAPER_RETRY_DELAY` | Initial delay before retries (s) | `5` |
 
 [[EVID: main.py:10-13 | Kivy configuration]] [[EVID: utils.py:76-87 | logging configuration]]
 

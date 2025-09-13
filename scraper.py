@@ -36,13 +36,28 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
 ]
 
+# Configuration with environment variable overrides
+RETRY_TOTAL = int(os.getenv("SCRAPER_RETRY_TOTAL", "5"))
+BACKOFF_FACTOR = float(os.getenv("SCRAPER_BACKOFF_FACTOR", "1"))
+REQUEST_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "10"))
+PAGE_RETRIES = int(os.getenv("SCRAPER_PAGE_RETRIES", "3"))
+RETRY_DELAY = int(os.getenv("SCRAPER_RETRY_DELAY", "5"))
+
 # IMPROVED: Better retry configuration with more specific status codes and methods
 session = requests.Session()
 retries = Retry(
-    total=5,
-    backoff_factor=1,
+    total=RETRY_TOTAL,
+    backoff_factor=BACKOFF_FACTOR,
     status_forcelist=[429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
-    allowed_methods=frozenset(['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'])  # Updated from 'method_whitelist'
+    allowed_methods=frozenset([
+        'GET',
+        'POST',
+        'PUT',
+        'DELETE',
+        'HEAD',
+        'OPTIONS',
+        'TRACE',
+    ])  # Updated from 'method_whitelist'
 )
 session.mount('http://', HTTPAdapter(max_retries=retries))
 session.mount('https://', HTTPAdapter(max_retries=retries))  # Added HTTPS adapter
@@ -87,7 +102,7 @@ def validate_url(url):
         return False
 
 
-def fetch_url(url, timeout=10, headers=None):
+def fetch_url(url, timeout=REQUEST_TIMEOUT, headers=None):
     """Fetch content from the URL and return the response text.
 
     Args:
@@ -155,7 +170,12 @@ def fetch_url(url, timeout=10, headers=None):
         raise
 
 
-def get_page_content(url, retries=3, delay=5, timeout=10):
+def get_page_content(
+    url,
+    retries=PAGE_RETRIES,
+    delay=RETRY_DELAY,
+    timeout=REQUEST_TIMEOUT,
+):
     """Fetch page content with retries and exponential backoff."""
     if not validate_url(url):  # ADDED: URL validation
         logging.error("Invalid URL provided")
