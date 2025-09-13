@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import platform
+import stat
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -68,14 +69,20 @@ def ensure_directory_exists(directory_path):
 def configure_logging(log_dir=None, log_level=None, max_bytes=5*1024*1024, backup_count=5, log_filename='scraper.log'):
     """
     Configure logging with both file and console output.
-    
+
     Args:
         log_dir (str, optional): Directory for log files. If None, uses system-appropriate default.
         log_level (int, optional): Logging level. If None, uses INFO for production-like behavior.
         max_bytes (int): Maximum size of each log file before rotation (default: 5MB).
         backup_count (int): Number of backup files to keep (default: 5).
         log_filename (str): Name of the log file (default: 'scraper.log').
-    
+
+    On Unix-like systems, log files are created with ``0o600`` permissions to restrict
+    access to the current user. Windows does not fully support Unix-style permissions;
+    the call is best effort and logs a debug message if strict permissions cannot be
+    applied. When ``SCRAPER_ENV`` is set to ``development`` the function verifies that
+    the expected permissions are present and logs a warning otherwise.
+
     Returns:
         str: Path to the log file, or None if file logging couldn't be set up.
     """
@@ -107,13 +114,30 @@ def configure_logging(log_dir=None, log_level=None, max_bytes=5*1024*1024, backu
             
             # Create rotating file handler
             file_handler = RotatingFileHandler(
-                log_filepath, 
-                maxBytes=max_bytes, 
+                log_filepath,
+                maxBytes=max_bytes,
                 backupCount=backup_count,
                 encoding='utf-8'  # Ensure UTF-8 encoding for international characters
             )
+
+            if os.name != 'nt':
+                try:
+                    os.chmod(log_filepath, 0o600)
+                except OSError as e:
+                    logging.debug("Failed to set log file permissions: %s", e)
+            else:
+                logging.debug("Skipping chmod on Windows")
+
+            if os.getenv('SCRAPER_ENV', '').lower() == 'development':
+                try:
+                    mode = stat.S_IMODE(os.stat(log_filepath).st_mode)
+                    if mode != 0o600:
+                        logging.warning("Log file permissions %o, expected 0o600", mode)
+                except OSError as e:
+                    logging.debug("Could not verify log file permissions: %s", e)
+
             file_handler.setLevel(log_level)
-            
+
             # Format for file output (more detailed)
             file_formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
