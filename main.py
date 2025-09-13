@@ -14,7 +14,7 @@ except ImportError:  # Security: handle missing optional dependency safely
 
 
 from kivy.config import Config
-from ui import ScraperApp
+from ui import ModernScraperApp
 from utils import configure_logging  # Ensure this import is present
 
 # Load environment variables from .env file
@@ -35,12 +35,12 @@ Config.set("graphics", "height", os.getenv("KIVY_HEIGHT", "600"))
 
 def main():
     try:
-        ScraperApp().run()
+        ModernScraperApp().run()
     except Exception as e:
         logging.error("Application encountered an error")
         logging.debug("Application error: %s", e, exc_info=True)
     finally:
-        logging.info("ScraperApp ended")
+        logging.info("ModernScraperApp ended")
 
 
 if __name__ == "__main__":  # FIXED: Changed **name** to __name__
