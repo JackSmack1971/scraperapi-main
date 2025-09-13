@@ -87,16 +87,37 @@ def validate_url(url):
         return False
 
 
-def fetch_url(url, timeout=10):
-    """Fetch content from the URL with a specified timeout and return the response text."""
+def fetch_url(url, timeout=10, headers=None):
+    """Fetch content from the URL and return the response text.
+
+    Args:
+        url: Target URL to fetch.
+        timeout: Request timeout in seconds.
+        headers: Optional dictionary of additional HTTP headers. User-provided values
+            override defaults.
+    """
     if not validate_url(url):  # ADDED: URL validation
         raise ValueError(f"Invalid URL: {url}")
-    
-    headers = {'User-Agent': get_random_user_agent()}
-    log_json(logger, logging.DEBUG, "Fetching URL", url=url, headers=headers)
-    
+
+    base_headers = {
+        "User-Agent": get_random_user_agent(),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "close",
+        "DNT": "1",
+        "Upgrade-Insecure-Requests": "1",
+    }
+    if headers:
+        base_headers.update(headers)
+    log_json(logger, logging.DEBUG, "Fetching URL", url=url, headers=base_headers)
+
     try:
-        response = session.get(SCRAPERAPI_URL + url, headers=headers, timeout=timeout)
+        response = session.get(
+            SCRAPERAPI_URL + url, headers=base_headers, timeout=timeout
+        )
         response.raise_for_status()
         log_json(logger,
             logging.DEBUG,
