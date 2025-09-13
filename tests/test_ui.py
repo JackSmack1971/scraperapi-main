@@ -1,12 +1,11 @@
 import os
 import sys
 
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 os.environ.setdefault("SCRAPER_API_KEY", "test")
 
+import logging
 import ui  # noqa: E402
 from ui import ScraperApp  # noqa: E402
 
@@ -34,9 +33,7 @@ def test_scrape_and_save_rejects_outside_path(monkeypatch, tmp_path):
     app.total_urls = 1
     app.completed_urls = 0
     app.failed_urls = []
-    monkeypatch.setattr(
-        ui, "get_default_output_directory", lambda: str(tmp_path)
-    )
+    monkeypatch.setattr(ui, "get_default_output_directory", lambda: str(tmp_path))
     monkeypatch.setattr(
         app, "_generate_filename", lambda url, index, fmt: "../evil.txt"
     )
@@ -50,3 +47,28 @@ def test_scrape_and_save_rejects_outside_path(monkeypatch, tmp_path):
     app._scrape_and_save(["http://example.com"], "txt")
     assert saved_paths == []
     assert "http://example.com" in app.failed_urls
+
+
+def test_on_stop_logs_when_thread_does_not_terminate(caplog):
+    app = ScraperApp()
+
+    class DummyThread:
+        def __init__(self):
+            self.join_timeout = None
+
+        def join(self, timeout=None):
+            self.join_timeout = timeout
+
+        def is_alive(self):
+            return True
+
+    app.scraping_thread = DummyThread()
+    with app.state_lock:
+        app.is_scraping = True
+
+    with caplog.at_level(logging.INFO):
+        app.on_stop()
+
+    assert app.stop_event.is_set()
+    assert app.scraping_thread.join_timeout == 30
+    assert any("failed to terminate" in record.message for record in caplog.records)
