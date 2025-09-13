@@ -25,6 +25,16 @@ def test_generate_filename_sanitizes_domain(monkeypatch):
         assert "." not in filename.split("_20240101")[0]
 
 
+def test_generate_filename_blocks_path_chars(monkeypatch):
+    app = ScraperApp()
+    monkeypatch.setattr(ui.time, "strftime", lambda fmt: "20240101_120000")
+    url = "https://evil.com/../bad"
+    filename = app._generate_filename(url, 1, "txt")
+    assert ".." not in filename
+    assert "/" not in filename
+    assert "\\" not in filename
+
+
 def test_scrape_and_save_rejects_outside_path(monkeypatch, tmp_path):
     app = ScraperApp()
     app.update_progress = lambda *args, **kwargs: None
