@@ -547,7 +547,7 @@ To modify settings:
             self.update_ui_state(False)
             self.logger.info("Background scraping thread completed")
 
-    def on_stop(self):
+    def on_stop(self) -> None:
         """Called when the app is about to close."""
         self.logger.info("App stopping")
         with self.state_lock:
@@ -562,7 +562,6 @@ To modify settings:
                 self.scraping_thread.join(timeout=30)
                 if self.scraping_thread.is_alive():
                     self.logger.warning("Scraping thread failed to terminate after 30s")
-        return True
 
 
 if __name__ == "__main__":
