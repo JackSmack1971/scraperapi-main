@@ -1,24 +1,27 @@
+import logging
 import os
-import re
 import platform
+import re
+import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 from urllib.parse import urlparse
+
 from kivy.app import App
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.boxlayout import BoxLayout
+from kivy.clock import Clock, mainthread
 from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.popup import Popup
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.checkbox import CheckBox
+from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.clock import mainthread
+from kivy.uix.textinput import TextInput
 from kivy.utils import platform as kivy_platform
-import threading
-import logging
-import time
+
 from scraper import scrape_text_data, save_data_to_file, validate_url
 from utils import configure_logging, get_logger, log_json
 
@@ -42,6 +45,96 @@ def get_default_output_directory():
     else:  # Linux and other Unix-like systems
         # Linux: Home directory
         return os.path.expanduser("~/ScraperApp/scraped_data")
+
+
+class EnhancedURLInput(BoxLayout):
+    """Widget for URL entry with validation and optional file import."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(orientation="vertical", **kwargs)
+        self.logger = get_logger(__name__)
+
+        self.text_input = TextInput(
+            hint_text=(
+                "Enter URLs (separated by commas or new lines)\n"
+                "Example: https://example.com, https://another-site.com"
+            ),
+            multiline=True,
+            font_size=14,
+            size_hint_y=None,
+            height=120,
+        )
+        self.add_widget(self.text_input)
+
+        status_layout = BoxLayout(size_hint_y=None, height=30, spacing=5)
+        self.status_label = Label(text="Enter URLs...", size_hint_x=0.7)
+        import_button = Button(text="Import URLs", size_hint_x=0.3)
+        import_button.bind(on_press=self._open_file_chooser)  # type: ignore
+        status_layout.add_widget(self.status_label)
+        status_layout.add_widget(import_button)
+        self.add_widget(status_layout)
+
+        self.valid_urls: List[str] = []
+        self.invalid_urls: List[str] = []
+        self._validation_event = None
+        self.text_input.bind(text=self._on_text_change)
+
+    def _on_text_change(self, *_: Any) -> None:
+        if self._validation_event:
+            self._validation_event.cancel()
+        # Debounce validation to avoid excessive processing
+        self._validation_event = Clock.schedule_once(self._validate_urls, 0.5)
+
+    def _validate_urls(self, *_: Any) -> None:
+        raw_text = self.text_input.text.strip()
+        urls = [u.strip() for u in re.split(r"[,\n]+", raw_text) if u.strip()]
+        self.valid_urls = []
+        self.invalid_urls = []
+        for url in urls:
+            if validate_url(url):
+                self.valid_urls.append(url)
+            else:
+                self.invalid_urls.append(url)
+        if not urls:
+            self.status_label.text = "Enter URLs..."
+        else:
+            self.status_label.text = (
+                f"{len(self.valid_urls)} valid / {len(self.invalid_urls)} invalid"
+            )
+
+    def _open_file_chooser(self, _instance: Button) -> None:
+        chooser = FileChooserListView()
+        popup = Popup(title="Select URL file", content=chooser, size_hint=(0.9, 0.9))
+        chooser.bind(
+            on_submit=lambda inst, selection, touch: self._file_chosen(popup, selection)
+        )
+        popup.open()
+
+    def _file_chosen(self, popup: Popup, selection: List[str]) -> None:
+        popup.dismiss()
+        if selection:
+            self._load_file(selection[0])
+
+    def _load_file(self, file_path: str) -> None:
+        try:
+            path = Path(file_path).expanduser().resolve()
+            if not path.is_file() or path.stat().st_size > 1_000_000:
+                raise ValueError("Invalid file")
+            # Security: read file safely with explicit encoding
+            content = path.read_text(encoding="utf-8")
+        except Exception as exc:  # Security: broad catch to avoid leaking errors
+            self.logger.error("Failed to import URLs: %s", exc)
+            self.status_label.text = "File load failed"
+            return
+        if self.text_input.text:
+            self.text_input.text += "\n"
+        self.text_input.text += content
+        self._validate_urls()
+
+    def get_valid_urls(self) -> List[str]:
+        """Return currently valid URLs."""
+        self._validate_urls()
+        return list(self.valid_urls)
 
 
 class ScraperApp(App):
@@ -97,18 +190,9 @@ class ScraperApp(App):
         description.bind(size=self._update_text_size)  # type: ignore
         layout.add_widget(description)
 
-        # Improved URL input with better placeholder
-        self.url_entry = TextInput(
-            hint_text=(
-                "Enter URLs (separated by commas or new lines)\n"
-                "Example: https://example.com, https://another-site.com"
-            ),
-            multiline=True,
-            font_size=14,
-            size_hint_y=None,
-            height=120,
-        )
-        layout.add_widget(self.url_entry)
+        # URL input component
+        self.url_input = EnhancedURLInput()
+        layout.add_widget(self.url_input)
 
         # Format selection
         layout.add_widget(self._create_format_selection())
@@ -346,32 +430,13 @@ To modify settings:
         # Reset stop event for new scraping session
         self.stop_event.clear()
 
-        # Parse and validate URLs
-        url_text = self.url_entry.text.strip()
-        if not url_text:
+        # Parse and validate URLs from input component
+        valid_urls = self.url_input.get_valid_urls()
+        invalid_urls = self.url_input.invalid_urls
+
+        if not (valid_urls or invalid_urls):
             self._show_error_popup("Input Error", "Please enter at least one URL.")
             return
-
-        # Support both comma and newline separation
-        urls = []
-        for url in re.split(r"[,\n]+", url_text):
-            url = url.strip()
-            if url:
-                urls.append(url)
-
-        if not urls:
-            self._show_error_popup("Input Error", "No valid URLs found.")
-            return
-
-        # Validate URLs
-        valid_urls = []
-        invalid_urls = []
-
-        for url in urls:
-            if validate_url(url):
-                valid_urls.append(url)
-            else:
-                invalid_urls.append(url)
 
         if invalid_urls:
             invalid_list = "\n".join(invalid_urls[:5])  # Show first 5
