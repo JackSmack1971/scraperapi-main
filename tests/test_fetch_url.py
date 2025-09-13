@@ -24,7 +24,8 @@ def test_fetch_url_uses_default_headers(monkeypatch):
     captured = {}
 
     def mock_get(url, headers=None, timeout=None):
-        captured.update(headers)
+        if headers is not None:
+            captured.update(headers)
         return DummyResponse()
 
     monkeypatch.setattr(
@@ -44,7 +45,8 @@ def test_fetch_url_allows_custom_headers(monkeypatch):
     captured = {}
 
     def mock_get(url, headers=None, timeout=None):
-        captured.update(headers)
+        if headers is not None:
+            captured.update(headers)
         return DummyResponse()
 
     monkeypatch.setattr(
