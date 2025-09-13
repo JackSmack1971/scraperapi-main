@@ -21,7 +21,7 @@ A cross-platform web scraping application with GUI interface for extracting and 
 
 ```mermaid
 flowchart TD
-    A[main.py] --> B[ScraperApp GUI]
+    A[main.py] --> B[ModernScraperApp GUI]
     B --> C[URL Input & Validation]
     C --> D[Concurrent Scraper]
     D --> E[ScraperAPI Service]
